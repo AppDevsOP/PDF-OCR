@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.8.335/pdf.min.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+</head>
+<body>
+
+<input type="file" id="pdfInput" accept=".pdf">
+<div id="outputImages"></div>
+
+<script>
+document.getElementById('pdfInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  
+  if (file) {
+    const reader = new FileReader();
+    
+    reader.onload = function(event) {
+      const arrayBuffer = event.target.result;
+      const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+      
+      loadingTask.promise.then(function(pdf) {
+        const outputContainer = document.getElementById('outputImages');
+        
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          pdf.getPage(pageNumber).then(function(page) {
+            const canvas = document.createElement('canvas');
+            const scale = 1.5;
+            const viewport = page.getViewport({ scale });
+            const context = canvas.getContext('2d');
+            
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            
+            const renderContext = {
+              canvasContext: context,
+              viewport: viewport
+            };
+            
+            page.render(renderContext).promise.then(function() {
+              const image = new Image();
+              image.src = canvas.toDataURL('image/jpeg'); // You can also use 'image/png'
+              outputContainer.appendChild(image);
+            });
+          });
+        }
+      });
+    };
+    
+    reader.readAsArrayBuffer(file);
+  }
+});
+</script>
+
+</body>
+</html>
