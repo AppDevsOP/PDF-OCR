@@ -1,0 +1,10 @@
+# Archivos de registro
+*.log
+
+# Archivos compilados
+*.class
+*.o
+*.pyc
+
+# Carpetas de dependencias (por ejemplo, Node.js)
+node_modules/
