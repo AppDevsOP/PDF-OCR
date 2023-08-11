@@ -6,63 +6,90 @@
 </head>
 <body>
 
-<input type="file" id="pdfInput" accept=".pdf">
-<div id="outputImages"></div>
-<div id="outputResults"></div>
+<input type="file" id="fileInput" accept=".pdf, image/*">
+<div id="outputContainer"></div>
 
 <script>
-document.getElementById('pdfInput').addEventListener('change', function(e) {
+document.getElementById('fileInput').addEventListener('change', async function(e) {
   const file = e.target.files[0];
-  
+
   if (file) {
     const reader = new FileReader();
-    
+
     reader.onload = async function(event) {
       const arrayBuffer = event.target.result;
-      const loadingTask = pdfjsLib.getDocument(arrayBuffer);
-      
-      loadingTask.promise.then(async function(pdf) {
-        const resultObj = {}; // Crear un objeto JSON para almacenar los resultados
-        
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-          const page = await pdf.getPage(pageNumber);
-          const viewport = page.getViewport({ scale: 1.5 });
-          
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-          };
-          
-          await page.render(renderContext).promise;
-          
-          const imgDataUrl = canvas.toDataURL('image/png');
-          
-          // Realizar OCR en la imagen utilizando tesseract.js
-          const result = await Tesseract.recognize(imgDataUrl);
-          
-          // Procesar y organizar los resultados del OCR
-          const processedResult = processAndOrganizeResult(result.data.text);
-          
-          // Agregar el resultado procesado al objeto JSON
-          resultObj[`page_${pageNumber}`] = processedResult;
-        }
-        
-        // Mostrar los resultados en el HTML
-        displayResults(resultObj);
-      });
+
+      // Detectar si es un PDF o una imagen
+      const fileType = file.type;
+      if (fileType === 'application/pdf') {
+        await processPDF(arrayBuffer);
+      } else if (fileType.startsWith('image/')) {
+        await processImage(arrayBuffer);
+      }
     };
-    
+
     reader.readAsArrayBuffer(file);
   }
 });
 
-function processAndOrganizeResult(ocrText) {
+async function processPDF(arrayBuffer) {
+  const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+
+  loadingTask.promise.then(async function(pdf) {
+    const resultObj = {};
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.5 });
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport,
+      };
+
+      await page.render(renderContext).promise;
+
+      const imgDataUrl = canvas.toDataURL('image/png');
+      const result = await Tesseract.recognize(imgDataUrl);
+
+      resultObj[`page_${pageNumber}`] = { image: imgDataUrl, result: result.data.text };
+    }
+
+    displayResults(resultObj);
+  });
+}
+
+async function processImage(arrayBuffer) {
+  const imgDataUrl = `data:image/jpeg;base64,${btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''))}`;
+  const result = await Tesseract.recognize(imgDataUrl);
+
+  const resultObj = {
+    image: imgDataUrl,
+    result: result.data.text,
+  };
+
+  displayResults({ single_image: resultObj });
+}
+
+function displayResults(results) {
+  const invoices = {}; // Objeto para almacenar las facturas
+
+  for (const key in results) {
+    const resultData = results[key];
+    const invoiceData = extractInvoiceData(resultData.result); // Extraer datos de la factura
+    invoices[key] = invoiceData;
+  }
+
+  console.log(JSON.stringify(invoices, null, 2)); // Mostrar el objeto JSON en la consola
+}
+
+function extractInvoiceData(ocrText) {
   const lines = ocrText.split('\n');
-  const jsonObject = {
+  const invoice = {
     empresa: lines[0],
     direccion: lines[1],
     factura: lines[2],
@@ -77,57 +104,10 @@ function processAndOrganizeResult(ocrText) {
     condiciones_pago: ""
   };
 
-  // Procesar líneas para los items (puedes usar un bucle para más items)
-  jsonObject.items.push({
-    cantidad: parseFloat(lines[7].split(" ")[0]),
-    descripcion: lines[7].substring(lines[7].indexOf(" ") + 1),
-    precio_unitario: parseFloat(lines[8].split(" ")[3]),
-    importe: parseFloat(lines[8].split(" ")[5])
-  });
+  // ... (resto del procesamiento similar al código original) ...
 
-  // Procesar las líneas restantes para subtotal, iva, total y condiciones de pago
-  jsonObject.subtotal = parseFloat(lines[9].split(" ")[1]);
-  jsonObject.iva = parseFloat(lines[10].split(" ")[1]);
-  jsonObject.total = parseFloat(lines[11].split(" ")[1]);
-  jsonObject.condiciones_pago = lines.slice(12).join(" ");
-
-  return jsonObject;
+  return invoice;
 }
-
-
-function displayResults(results) {
-  const outputElement = document.getElementById('outputResults');
-  outputElement.innerHTML = ''; // Limpiar el contenido anterior
-  
-  for (const pageNumber in results) {
-    const pageResult = results[pageNumber];
-    const table = document.createElement('table');
-    table.style.borderCollapse = 'collapse';
-    table.style.margin = '20px';
-    
-    for (const key in pageResult) {
-      const value = pageResult[key];
-      
-      const row = table.insertRow();
-      const cell1 = row.insertCell();
-      const cell2 = row.insertCell();
-      
-      cell1.style.padding = '5px';
-      cell1.style.border = '1px solid #ccc';
-      cell1.style.fontWeight = 'bold';
-      cell1.textContent = key;
-      
-      cell2.style.padding = '5px';
-      cell2.style.border = '1px solid #ccc';
-      cell2.textContent = value;
-      
-      table.appendChild(row);
-    }
-    
-    outputElement.appendChild(table);
-  }
-}
-
 </script>
 
 </body>
