@@ -1,114 +1,149 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.8.335/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js"></script>
 </head>
+
 <body>
 
-<input type="file" id="fileInput" accept=".pdf, image/*">
-<div id="outputContainer"></div>
+  <input type="file" id="fileInput" accept=".pdf, image/*">
 
-<script>
-document.getElementById('fileInput').addEventListener('change', async function(e) {
-  const file = e.target.files[0];
+  <script>
+    document.getElementById('fileInput').addEventListener('change', async function (e) {
+      const file = e.target.files[0];
 
-  if (file) {
-    const reader = new FileReader();
+      if (file) {
+        const reader = new FileReader();
 
-    reader.onload = async function(event) {
-      const arrayBuffer = event.target.result;
+        reader.onload = async function (event) {
+          const arrayBuffer = event.target.result;
 
-      // Detectar si es un PDF o una imagen
-      const fileType = file.type;
-      if (fileType === 'application/pdf') {
-        await processPDF(arrayBuffer);
-      } else if (fileType.startsWith('image/')) {
-        await processImage(arrayBuffer);
+          // Detectar si es un PDF o una imagen
+          const fileType = file.type;
+          if (fileType === 'application/pdf') {
+            await processPDF(arrayBuffer);
+          } else if (fileType.startsWith('image/')) {
+            await processImage(arrayBuffer);
+          }
+        };
+
+        reader.readAsArrayBuffer(file);
       }
-    };
+    });
 
-    reader.readAsArrayBuffer(file);
-  }
-});
+    async function processPDF(arrayBuffer) {
+      const loadingTask = pdfjsLib.getDocument(arrayBuffer);
 
-async function processPDF(arrayBuffer) {
-  const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+      loadingTask.promise.then(async function (pdf) {
+        const resultObj = {};
 
-  loadingTask.promise.then(async function(pdf) {
-    const resultObj = {};
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+          const page = await pdf.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1.5 });
 
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+          };
 
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const renderContext = {
-        canvasContext: context,
-        viewport: viewport,
-      };
+          await page.render(renderContext).promise;
 
-      await page.render(renderContext).promise;
+          const imgDataUrl = canvas.toDataURL('image/png');
+          const result = await Tesseract.recognize(imgDataUrl);
 
-      const imgDataUrl = canvas.toDataURL('image/png');
-      const result = await Tesseract.recognize(imgDataUrl);
+          console.log(`Texto escaneado por OCR en página ${pageNumber}:`);
+          console.log(result.data.text);
 
-      resultObj[`page_${pageNumber}`] = { image: imgDataUrl, result: result.data.text };
+          resultObj[`page_${pageNumber}`] = { image: imgDataUrl, result: result.data.text };
+        }
+
+        displayResults(resultObj);
+      });
     }
 
-    displayResults(resultObj);
-  });
-}
+    async function processImage(arrayBuffer) {
+      const imgDataUrl = `data:image/jpeg;base64,${btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''))}`;
+      const result = await Tesseract.recognize(imgDataUrl);
 
-async function processImage(arrayBuffer) {
-  const imgDataUrl = `data:image/jpeg;base64,${btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ''))}`;
-  const result = await Tesseract.recognize(imgDataUrl);
+      console.log('Texto escaneado por OCR:');
+      console.log(result.data.text);
 
-  const resultObj = {
-    image: imgDataUrl,
-    result: result.data.text,
-  };
+      const resultObj = {
+        image: imgDataUrl,
+        result: result.data.text,
+      };
 
-  displayResults({ single_image: resultObj });
-}
+      displayResults({ single_image: resultObj });
+    }
 
-function displayResults(results) {
-  const invoices = {}; // Objeto para almacenar las facturas
+    function displayResults(results) {
+      const invoices = {}; // Objeto para almacenar las facturas
 
-  for (const key in results) {
-    const resultData = results[key];
-    const invoiceData = extractInvoiceData(resultData.result); // Extraer datos de la factura
-    invoices[key] = invoiceData;
-  }
+      for (const key in results) {
+        const resultData = results[key];
+        const invoiceData = extractInvoiceData(resultData.result); // Extraer datos de la factura
+        invoices[key] = invoiceData;
+      }
 
-  console.log(JSON.stringify(invoices, null, 2)); // Mostrar el objeto JSON en la consola
-}
+      // Mostrar el objeto JSON en la consola
+      console.log('Objeto JSON:');
+      console.log(JSON.stringify(invoices, null, 2));
+    }
 
-function extractInvoiceData(ocrText) {
-  const lines = ocrText.split('\n');
-  const invoice = {
-    empresa: lines[0],
-    direccion: lines[1],
-    factura: lines[2],
-    cliente: lines[3],
-    direccion_cliente: lines[4],
-    numero_pedido: lines[5],
-    fecha_vencimiento: lines[6],
-    items: [],
-    subtotal: "",
-    iva: "",
-    total: "",
-    condiciones_pago: ""
-  };
+    function extractInvoiceData(ocrText) {
+      const lines = ocrText.toLowerCase().split('\n'); // Normalizar el texto a minúsculas
+      const invoice = {
+        empresa: lines[0],
+        direccion: lines[1],
+        factura: lines[2],
+        cliente: lines[3],
+        direccion_cliente: lines[4],
+        numero_pedido: lines[5],
+        fecha_vencimiento: lines[6],
+        items: [],
+        subtotal: "",
+        iva: "",
+        total: "",
+        condiciones_pago: ""
+      };
 
-  // ... (resto del procesamiento similar al código original) ...
 
-  return invoice;
-}
-</script>
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.includes("condiciones y forma de pag")) {
+          const condicionesPagoLine = lines[i + 1]; // Siguiente línea después de "CONDICIONES Y FORMA DE PAGO"
+          invoice.condiciones_pago = condicionesPagoLine.trim(); // Almacena las condiciones de pago
+        } else if (line.includes("subtotal")) {
+          const subtotalMatch = line.match(/\d+\.\d+/);
+          if (subtotalMatch) {
+            invoice.subtotal = subtotalMatch[0];
+          }
+        } else if (line.includes("iva")) {
+          const ivaMatch = line.match(/\d+\.\d+/);
+          if (ivaMatch) {
+            invoice.iva = ivaMatch[0];
+          }
+        } else if (line.includes("total")) {
+          const totalMatch = line.match(/\d+\.\d+/);
+          if (totalMatch) {
+            invoice.total = totalMatch[0];
+          }
+        }
+      }
+
+
+      return invoice;
+    }
+  </script>
 
 </body>
+
 </html>
